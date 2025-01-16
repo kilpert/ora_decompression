@@ -1,0 +1,129 @@
+import json
+import glob
+import os
+import re
+
+
+## set snakemake default resources in Snakefile
+
+try:
+    workflow.global_resources["io_requests"]
+except:
+    workflow.global_resources["io_requests"] = 4
+
+
+## 1st level of config variable definition: config.yaml ################################################################
+try:
+    configfile: "config/config.yaml"
+except:
+    pass
+
+
+## 2nd level of config variable definition: snakemake command line args (overwrites previous definitions) ##############
+
+
+## 3rd level of config variable definition: Snakefile (overwrites previous definitions) ################################
+
+include: "rules/variables.smk"
+
+print("{:#^60}".format(" ora "))
+print(oras, len(oras))
+
+if not oras:
+    print(f"Error: No ORA files found in: '{config['indir']}'")
+    exit(0)
+
+if verbose:
+    print("{:#^60}".format(" Config "))
+    print(json.dumps(config, sort_keys=True, indent=4))
+
+
+# rule all ############################################################################################################
+if verbose:
+    print("{:#^60}".format(" Workflow "))
+
+
+rule all:
+    input:
+        "resources/orad.2.7.0.linux.tar.gz",
+        "resources/orad.2.7.0.linux/orad",
+        "resources/orad.2.7.0.linux/oradata",
+
+        expand("{results}/fastq/{ora}.fastq.gz",
+            results=results,
+            ora=oras,
+        ),
+
+        expand("{results}/fastq/checksum.md5",
+            results=results,
+        ),
+
+
+rule download_orad:
+    output:
+        "resources/orad.2.7.0.linux.tar.gz",
+    params:
+        url="https://s3.amazonaws.com/webdata.illumina.com/downloads/software/dragen-decompression/orad.2.7.0.linux.tar.gz"
+    log:
+        "resources/orad.2.7.0.linux.tar.gz.log"
+    shell:
+        "curl "
+        "-o ./resources/orad.2.7.0.linux.tar.gz "
+        "{params.url} "
+        ">{log} 2>&1 "
+
+
+rule extract_orad:
+    input:
+        rules.download_orad.output
+    output:
+        orad="resources/orad.2.7.0.linux/orad",
+        oradata=directory("resources/orad.2.7.0.linux/oradata"),
+    shell:
+        "tar xzvf "
+        "{input} "
+        "-C ./resources "
+
+
+rule ora2fastq:
+    input:
+        orad=rules.extract_orad.output.orad,
+        oradata=rules.extract_orad.output.oradata,
+        ora=lambda wildcards: config["ora"][wildcards.ora]
+    output:
+        "{results}/fastq/{ora}.fastq.gz"
+    log:
+        "{results}/log/{ora}.ora2fastq.log"
+    benchmark:
+        "{results}/.benchmark/{ora}.ora2fastq.tsv"
+    threads:
+        8
+    resources:
+        io_requests=1
+    shell:
+        "{input.orad} "
+        "--info "
+        "{input.ora} "
+        ">{log} "
+        "&& "
+        "{input.orad} "
+        "--threads {threads} "
+        "--ora-reference {input.oradata} "
+        "-o {output} "
+        "{input.ora} "
+        ">>{log} "
+
+
+rule fastq_md5:
+    input:
+        expand("{results}/fastq/{ora}.fastq.gz",
+            results=results,
+            ora=oras,
+        )
+    output:
+        "{results}/fastq/checksum.md5"
+    params:
+        outdir="{results}/fastq/"
+    shell:
+        "workflow/scripts/md5_make.sh "
+        "{params.outdir} "

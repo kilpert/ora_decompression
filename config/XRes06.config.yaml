@@ -1,9 +1,3 @@
-indir: ora/
+indir: ora/XRes06
 outdir: results/XRes06
-
-# whitelist:
-#   - Pool2C_S1_L001_R1_001
-#   - Pool2C_S1_L001_R2_001
-
-verbose: True
 
